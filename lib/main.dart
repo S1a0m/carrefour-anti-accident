@@ -14,7 +14,71 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class CarrefourScreen extends StatelessWidget {
+class CarrefourScreen extends StatefulWidget {
+  @override
+  _CarrefourScreenState createState() => _CarrefourScreenState();
+}
+
+class _CarrefourScreenState extends State<CarrefourScreen> {
+  String _matricule = "BP 503 C4";
+  final TextEditingController _controller = TextEditingController();
+
+  void _showMatricule(BuildContext context) {
+    _controller.text = _matricule;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.black87,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text('Matricule de la plaque',
+            style: TextStyle(color: Colors.greenAccent)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("N° actuel : $_matricule", style: TextStyle(fontSize: 20)),
+            SizedBox(height: 20),
+            TextField(
+              controller: _controller,
+              style: TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Entrer nouveau matricule',
+                labelStyle: TextStyle(color: Colors.greenAccent),
+                hintText: 'Ex: BP 503 C4',
+                hintStyle: TextStyle(color: Colors.white24),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.greenAccent),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.greenAccent, width: 2),
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.greenAccent.withOpacity(0.2),
+              ),
+              onPressed: () {
+                setState(() {
+                  _matricule = _controller.text;
+                });
+                Navigator.pop(context);
+              },
+              child: Text("Changer"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Fermer', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -26,16 +90,16 @@ class CarrefourScreen extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            title: Text('Entrer le numéro de la plaque'),
-            leading: Icon(Icons.drive_eta),
+            title: Text('Numéro de la plaque'),
+            leading: Icon(Icons.drive_eta, color: Colors.greenAccent),
             onTap: () {
               Navigator.pop(context);
-              // Implémenter l'action ici
+              _showMatricule(context);
             },
           ),
           ListTile(
-            title: Text('Changer le numéro'),
-            leading: Icon(Icons.edit),
+            title: Text('Sanctions'),
+            leading: Icon(Icons.gavel, color: Colors.yellowAccent),
             onTap: () {
               Navigator.pop(context);
               // Implémenter l'action ici
@@ -60,40 +124,26 @@ class CarrefourScreen extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(
-                    spacing: 2.0,
                     children: [
-                      Text(
-                        "C",
-                        style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 18,
-                            color: Colors.greenAccent),
-                      ),
-                      Text(
-                        "A",
-                        style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 20,
-                            color: Colors.yellowAccent),
-                      ),
-                      Text(
-                        "A",
-                        style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 22,
-                            color: Colors.redAccent),
-                      ),
+                      Text("C",
+                          style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 18,
+                              color: Colors.greenAccent)),
+                      SizedBox(width: 2),
+                      Text("A",
+                          style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 20,
+                              color: Colors.yellowAccent)),
+                      SizedBox(width: 2),
+                      Text("A",
+                          style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 22,
+                              color: Colors.redAccent)),
                     ],
                   ),
-                  /*Row(
-                    children: [
-                      Text("100 m", style: TextStyle(fontSize: 22)),
-                    ],
-                  ),*/
-                  //Icon(Icons.signal_cellular_alt),
-                  /*Text("kit anti-incident",
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 18))*/
                   Icon(Icons.directions),
                 ],
               ),
@@ -123,25 +173,26 @@ class CarrefourScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              SizedBox(height: 32),
+              SizedBox(height: 26),
+              Icon(Icons.arrow_circle_right_outlined),
+              SizedBox(height: 26),
               Text("ROUTE NORD", style: TextStyle(fontSize: 22)),
               SizedBox(height: 10),
               Container(
                 padding: EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                    border: Border.all(
-                        color: Colors.greenAccent.withOpacity(0.5), width: 3),
-                    borderRadius: BorderRadius.circular(10)),
+                  border: Border.all(
+                      color: Colors.greenAccent.withOpacity(0.5), width: 3),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Center(
                   child: Row(
-                    spacing: 5.0,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        Icons.warning_amber_rounded,
-                        color: const Color.fromARGB(255, 184, 78, 71),
-                        size: 30,
-                      ),
+                      Icon(Icons.warning_amber_rounded,
+                          color: const Color.fromARGB(255, 184, 78, 71),
+                          size: 30),
+                      SizedBox(width: 5),
                       Text("CÉDEZ LE PASSAGE",
                           style: TextStyle(
                               fontSize: 20,
@@ -152,7 +203,7 @@ class CarrefourScreen extends StatelessWidget {
                 ),
               ),
               Spacer(),
-              // Triangle inversé
+              // Triangle inversé (menu)
               IconButton(
                 icon: Icon(Icons.arrow_drop_down, size: 70),
                 onPressed: () => _showMenu(context),
