@@ -6,7 +6,8 @@ class SanctionsScreen extends StatelessWidget {
   final List<Map<String, String>> sanctions = const [
     {
       'titre': 'Non-respect du feu rouge',
-      'description': 'Amende de 10 000 FCFA et retrait de 2 points sur le permis.'
+      'description':
+          'Amende de 10 000 FCFA et retrait de 2 points sur le permis.'
     },
     {
       'titre': 'Franchissement du feu orange sans ralentir',
@@ -47,7 +48,7 @@ class SanctionsScreen extends StatelessWidget {
               const Text(
                 'Sanctions liées aux feux tricolores',
                 style: TextStyle(
-                  color: Colors.greenAccent,
+                  color: Colors.orangeAccent,
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                 ),

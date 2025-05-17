@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 
 class CarrefourScreen extends StatefulWidget {
   const CarrefourScreen({super.key});
@@ -9,7 +10,7 @@ class CarrefourScreen extends StatefulWidget {
 class _CarrefourScreenState extends State<CarrefourScreen> {
   String _matricule = "BP 503 C4";
   final TextEditingController _controller = TextEditingController();
-  int _selectedIndex = 0;
+  int _selectedIndex = 2;
 
   Widget _getSelectedView(int index) {
     switch (index) {
@@ -102,7 +103,7 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
           ),
           ListTile(
             title: Text('Sanctions'),
-            leading: Icon(Icons.gavel, color: Colors.yellowAccent),
+            leading: Icon(Icons.gavel, color: Colors.orangeAccent),
             onTap: () {
               Navigator.pop(context);
               Navigator.pushNamed(context, '/sanctions');
@@ -125,6 +126,12 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
+                  Image.asset(
+                    "assets/icons/caa_icon.png",
+                    width: 30,
+                    height: 30,
+                    fit: BoxFit.cover,
+                  ),
                   Row(
                     children: [
                       Text("C",
@@ -136,21 +143,21 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
                       Text("A",
                           style: TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 20,
-                              color: Colors.yellowAccent)),
+                              fontSize: 18,
+                              color: Colors.orangeAccent)),
                       SizedBox(width: 2),
                       Text("A",
                           style: TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 22,
+                              fontSize: 18,
                               color: Colors.redAccent)),
                     ],
                   ),
-                  Icon(Icons.signal_cellular_alt_rounded),
+                  // Icon(Icons.gps_not_fixed_rounded),
                 ],
               ),
               SizedBox(height: 50),
-              NoCrossRoadAroundView(),
+              _getSelectedView(_selectedIndex),
               Spacer(),
               Container(
                 decoration: BoxDecoration(
@@ -209,7 +216,8 @@ class AlertCrossRoadAroundView extends StatelessWidget {
             ),
           ),
           SizedBox(height: 26),
-          Icon(Icons.arrow_circle_right_outlined),
+          const ChevronDirectionAnimated(),
+
           /* SizedBox(height: 26),
             Text("ROUTE NORD", style: TextStyle(fontSize: 22)),*/
           SizedBox(height: 26),
@@ -225,7 +233,7 @@ class AlertCrossRoadAroundView extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.warning_amber_rounded,
-                      color: const Color.fromARGB(255, 184, 78, 71), size: 30),
+                      color: Colors.redAccent, size: 30),
                   SizedBox(width: 5),
                   Text("CÉDEZ LE PASSAGE",
                       style: TextStyle(
@@ -331,17 +339,68 @@ class AttemptConnectionView extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white10, width: 50),
             ),
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+            ),
           ),
-
-          /* SizedBox(height: 26),
-            Text("ROUTE NORD", style: TextStyle(fontSize: 22)),*/
+          SizedBox(height: 26),
+          Text("Patientez", style: TextStyle(fontSize: 22)),
         ],
       ),
     );
   }
 }
 
+class ChevronDirectionAnimated extends StatefulWidget {
+  const ChevronDirectionAnimated({super.key});
 
-/**Tu vois ceci:
-Icon(Icons.arrow\_circle\_right\_outlined)? Je l'avais mis sur carrefour\_screen.dart. Mais c'est pas ça je souhaitais avant. Ce que je souhaitais c'est les flèches de directions qui s'animent souvent sur les voix ou les grands centre pour indiquer une direction droite et se présentent comme ça souvent: ">>>>". Peut tu m'en  faire un qui s'anime si tu as compris?  Ce qu'il faut animer c'est chaque chevrons qui passent d'un vert sombre à un vert clair de manière continue de la gauche vers la droite. As-tu compris? Si oui, lance toi.
- */
+  @override
+  State<ChevronDirectionAnimated> createState() =>
+      _ChevronDirectionAnimatedState();
+}
+
+class _ChevronDirectionAnimatedState extends State<ChevronDirectionAnimated> {
+  int _activeIndex = 0;
+  late Timer _timer;
+
+  final int chevronCount = 5;
+  final Duration interval = const Duration(milliseconds: 250);
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(interval, (timer) {
+      setState(() {
+        _activeIndex = (_activeIndex + 1) % chevronCount;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  Color _getChevronColor(int index) {
+    if (index == _activeIndex) {
+      return Colors.greenAccent.shade200;
+    } else {
+      return Colors.green.shade800;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(chevronCount, (index) {
+        return Icon(
+          Icons.chevron_right,
+          color: _getChevronColor(index),
+          size: 32,
+        );
+      }),
+    );
+  }
+}
