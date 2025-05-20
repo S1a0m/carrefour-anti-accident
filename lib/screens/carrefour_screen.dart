@@ -1,5 +1,13 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'package:caa/views/attempt_connection_view.dart';
+import 'package:caa/views/carrefour_views/alert_cross_road_around_view.dart';
+import 'package:caa/views/carrefour_views/no_crossroad_around_view.dart';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vibration/vibration.dart';
 
 class CarrefourScreen extends StatefulWidget {
   const CarrefourScreen({super.key});
@@ -8,9 +16,246 @@ class CarrefourScreen extends StatefulWidget {
 }
 
 class _CarrefourScreenState extends State<CarrefourScreen> {
-  String _matricule = "BP 503 C4";
+  String _matricule = "XX ZZ XXXX";
   final TextEditingController _controller = TextEditingController();
-  int _selectedIndex = 2;
+  int _selectedIndex = 0;
+  bool showChevronRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    initApp();
+  }
+
+  Future<void> initApp() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? jsonData = prefs.getString('vehicule_info');
+
+    if (jsonData == null) {
+      await prefs.setString(
+          'vehicule_info', jsonEncode({"matricule": "", "ok": false}));
+      _showMatricule(context);
+      return;
+    }
+
+    final data = jsonDecode(jsonData);
+    final String matricule = data['matricule'];
+    final bool ok = data['ok'];
+
+    if (!ok) {
+      _showMatricule(context);
+    } else {
+      final response = await http
+          .get(Uri.parse('http://192.168.199.114:8000/vehicle/$matricule'));
+
+      if (response.statusCode == 400 || response.statusCode == 422) {
+        showError("Un véhicule portant cette plaque n'existe pas.");
+        _showMatricule(context);
+      } else if (response.statusCode == 200) {
+        hideMatricule();
+        setState(() => _selectedIndex = 1);
+        startGPSCycle();
+      }
+    }
+  }
+
+  Timer? _gpsTimer;
+
+  Future<void> startGPSCycle() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        debugPrint("Permission localisation refusée.");
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      debugPrint("Permission localisation refusée définitivement.");
+      await Geolocator.openAppSettings();
+      return;
+    }
+
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      debugPrint("Le service de localisation est désactivé.");
+      return;
+    }
+
+    _gpsTimer?.cancel();
+    _gpsTimer = Timer.periodic(Duration(seconds: 5), (_) async {
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+
+        final response = await http.post(
+          Uri.parse('http://192.168.199.114:8000/gps'),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({
+            "latitude": position.latitude,
+            "longitude": position.longitude,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['status'] == true) {
+            String crossroad = data['crossroad_name'];
+            Map<String, dynamic> state = data['state'];
+            int trafficLightCycle = state['traffic_light_cycle'];
+            DateTime startTime = DateTime.parse(state['create_at']);
+            int distanceM = data["distance_m"];
+
+            Map<String, int> colorDurations = {
+              "red": state['red_cycle'],
+              "orange": state['orange_cycle'],
+              "green": state['green_cycle'],
+            };
+
+            String beginColor = state['begin_color_cycle'];
+            ColorState stateCurrent = getCurrentColor(
+              startTime,
+              trafficLightCycle,
+              colorDurations,
+              beginColor,
+            );
+
+            bool turnRightAllowed = state['turn_right_if_red'] == true &&
+                stateCurrent.color == 'red';
+
+            bool violationFeu = stateCurrent.color == 'red' && distanceM < 0;
+
+            if (violationFeu || distanceM <= 0) {
+              if (await Vibration.hasVibrator() ?? false) {
+                Vibration.vibrate();
+              }
+            }
+
+            showChevronRight = turnRightAllowed;
+
+            trafficLightNotifier.value = TrafficLightData(
+              stateCurrent,
+              showChevronRight,
+              crossroad,
+              colorDurations,
+            );
+
+            if (_selectedIndex != 2) {
+              setState(() => _selectedIndex = 2);
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("Erreur GPS/post: $e");
+      }
+    });
+  }
+
+  ColorState getCurrentColor(
+    DateTime startTime,
+    int totalCycle,
+    Map<String, int> durations,
+    String beginColor,
+  ) {
+    final now = DateTime.now();
+    final secondsSinceStart = now.difference(startTime).inSeconds;
+    final cyclePosition = secondsSinceStart % totalCycle;
+
+    // Crée une séquence ordonnée des couleurs
+    List<String> colorOrder = ["red", "orange", "green"];
+    int startIndex = colorOrder.indexOf(beginColor);
+    List<String> orderedColors = [
+      ...colorOrder.sublist(startIndex),
+      ...colorOrder.sublist(0, startIndex)
+    ];
+
+    int elapsed = 0;
+    for (var color in orderedColors) {
+      int duration = durations[color]!;
+      if (cyclePosition < elapsed + duration) {
+        return ColorState(color, cyclePosition - elapsed);
+      }
+      elapsed += duration;
+    }
+
+    return ColorState("unknown", 0);
+  }
+
+  Future<void> verifyMatricule(String inputMatricule) async {
+    final verifyResponse = await http.get(Uri.parse(
+        'http://192.168.199.114:8000/vehicle/plate_number/$inputMatricule'));
+
+    if (verifyResponse.statusCode != 200) {
+      showError("Erreur de vérification.");
+      return;
+    }
+
+    final verifyData = jsonDecode(verifyResponse.body);
+    if (verifyData['found'] == false) {
+      showError("Aucun véhicule ne possède cette plaque");
+      return;
+    }
+
+    showInfo("Nous venons de vous envoyer un message de confirmation...");
+    setState(() => _selectedIndex = 0); // Affiche AttemptConnectionView
+
+    bool permitted = false;
+    int attempts = 0;
+
+    while (attempts < 10) {
+      await Future.delayed(Duration(seconds: 10));
+
+      final confirmResponse = await http.get(
+          Uri.parse('http://192.168.199.114:8000/vehicle/$inputMatricule'));
+
+      if (confirmResponse.statusCode == 200) {
+        final confirmData = jsonDecode(confirmResponse.body);
+        permitted = confirmData['permitted'];
+        if (permitted) break;
+      }
+
+      attempts++;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('vehicule_info',
+        jsonEncode({"matricule": inputMatricule, "ok": permitted}));
+
+    if (permitted) {
+      hideMatricule();
+      setState(() => _selectedIndex = 1); // Affiche NoCrossRoadAroundView
+      startGPSCycle();
+    } else {
+      showError("Confirmation non reçue ou refusée.");
+    }
+  }
+
+  void showInfo(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.blue,
+      ),
+    );
+  }
+
+  void showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void hideMatricule() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
 
   Widget _getSelectedView(int index) {
     switch (index) {
@@ -25,8 +270,17 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
     }
   }
 
-  void _showMatricule(BuildContext context) {
+  Future<void> _showMatricule(BuildContext context) async {
     _controller.text = _matricule;
+    final prefs = await SharedPreferences.getInstance();
+    final String? jsonData = prefs.getString('vehicule_info');
+
+    String plate_number = "";
+
+    if (jsonData != null) {
+      final data = jsonDecode(jsonData);
+      plate_number = data['matricule'] ?? "";
+    }
 
     showDialog(
       context: context,
@@ -38,7 +292,7 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text("N° actuel : $_matricule", style: TextStyle(fontSize: 20)),
+            Text("N° actuel : $plate_number", style: TextStyle(fontSize: 20)),
             SizedBox(height: 20),
             TextField(
               controller: _controller,
@@ -46,7 +300,7 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
               decoration: InputDecoration(
                 labelText: 'Entrer nouveau matricule',
                 labelStyle: TextStyle(color: Colors.greenAccent),
-                hintText: 'Ex: BP 503 C4',
+                hintText: 'Ex: XX YY ZZZZZ',
                 hintStyle: TextStyle(color: Colors.white24),
                 enabledBorder: OutlineInputBorder(
                   borderSide: BorderSide(color: Colors.greenAccent),
@@ -65,6 +319,7 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
                 setState(() {
                   _matricule = _controller.text;
                 });
+                verifyMatricule(_matricule);
                 Navigator.pop(context);
               },
               child: Text("Changer"),
@@ -182,225 +437,22 @@ class _CarrefourScreenState extends State<CarrefourScreen> {
   }
 }
 
-class AlertCrossRoadAroundView extends StatelessWidget {
-  const AlertCrossRoadAroundView({
-    super.key,
-  });
+class ColorState {
+  final String color;
+  final int elapsed;
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      child: Column(
-        children: [
-          Text("Carrefour B à 100 mètres", style: TextStyle(fontSize: 26)),
-          SizedBox(height: 32),
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                  color: Colors.greenAccent.withOpacity(0.5), width: 3),
-            ),
-            child: Container(
-              width: 330,
-              height: 330,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.greenAccent, width: 50),
-              ),
-              child: Center(
-                child: Text(
-                  "27",
-                  style: TextStyle(fontSize: 100, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-          ),
-          SizedBox(height: 26),
-          const ChevronDirectionAnimated(),
-
-          /* SizedBox(height: 26),
-            Text("ROUTE NORD", style: TextStyle(fontSize: 22)),*/
-          SizedBox(height: 26),
-          Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(
-                  color: Colors.greenAccent.withOpacity(0.5), width: 3),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.warning_amber_rounded,
-                      color: Colors.redAccent, size: 30),
-                  SizedBox(width: 5),
-                  Text("CÉDEZ LE PASSAGE",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w500,
-                        //color: Colors.greenAccent
-                      )),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  ColorState(this.color, this.elapsed);
 }
 
-class NoCrossRoadAroundView extends StatelessWidget {
-  const NoCrossRoadAroundView({
-    super.key,
-  });
+class TrafficLightData {
+  final ColorState colorState;
+  final bool showChevronRight;
+  final String crossroadName;
+  final Map<String, int> colorDurations;
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      child: Column(
-        children: [
-          Text("Aucun carrefour à proximité",
-              style: TextStyle(fontSize: 26, color: Colors.white10)),
-          SizedBox(height: 32),
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white10, width: 3),
-            ),
-            child: Container(
-              width: 330,
-              height: 330,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white10, width: 50),
-              ),
-              child: Center(
-                child: Text(
-                  "00",
-                  style: TextStyle(
-                      fontSize: 100,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white10),
-                ),
-              ),
-            ),
-          ),
-          /* SizedBox(height: 26),
-            Text("ROUTE NORD", style: TextStyle(fontSize: 22)),*/
-          SizedBox(height: 52),
-          Container(
-            padding: EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white10, width: 3),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.signal_cellular_alt,
-                      color: Colors.white10, size: 30),
-                  SizedBox(width: 5),
-                  Text("CONNECTÉ",
-                      style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white10
-                          //color: Colors.greenAccent
-                          )),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  TrafficLightData(this.colorState, this.showChevronRight, this.crossroadName,
+      this.colorDurations);
 }
 
-class AttemptConnectionView extends StatelessWidget {
-  const AttemptConnectionView({
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      child: Column(
-        children: [
-          Text("Connexion en cours...", style: TextStyle(fontSize: 26)),
-          SizedBox(height: 32),
-          Container(
-            width: 330,
-            height: 330,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white10, width: 50),
-            ),
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.greenAccent),
-            ),
-          ),
-          SizedBox(height: 26),
-          Text("Patientez", style: TextStyle(fontSize: 22)),
-        ],
-      ),
-    );
-  }
-}
-
-class ChevronDirectionAnimated extends StatefulWidget {
-  const ChevronDirectionAnimated({super.key});
-
-  @override
-  State<ChevronDirectionAnimated> createState() =>
-      _ChevronDirectionAnimatedState();
-}
-
-class _ChevronDirectionAnimatedState extends State<ChevronDirectionAnimated> {
-  int _activeIndex = 0;
-  late Timer _timer;
-
-  final int chevronCount = 5;
-  final Duration interval = const Duration(milliseconds: 250);
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(interval, (timer) {
-      setState(() {
-        _activeIndex = (_activeIndex + 1) % chevronCount;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    super.dispose();
-  }
-
-  Color _getChevronColor(int index) {
-    if (index == _activeIndex) {
-      return Colors.greenAccent.shade200;
-    } else {
-      return Colors.green.shade800;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(chevronCount, (index) {
-        return Icon(
-          Icons.chevron_right,
-          color: _getChevronColor(index),
-          size: 32,
-        );
-      }),
-    );
-  }
-}
+final ValueNotifier<TrafficLightData?> trafficLightNotifier =
+    ValueNotifier(null);
